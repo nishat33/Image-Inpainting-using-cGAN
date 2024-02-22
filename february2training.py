@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Feb  2 23:14:21 2024
-
-@author: CCC-PC
-"""
-
-# -*- coding: utf-8 -*-
-"""
 Created on Fri Feb  2 02:54:26 2024
 
 @author: CCC-PC
@@ -117,19 +110,19 @@ mask_transform = transforms.Compose([
 
 # Create dataset instances
 train_dataset = InpaintingDataset(
-    # image_dir='E:/1807033/Dataset/TEMPTRAINIMG',
-    # mask_dir='E:/1807033/Dataset/TEMPTRAINMASK',
-    image_dir='E:/1807033/Dataset/sub_train_256',
-    mask_dir='E:/1807033/Dataset/mask/mask/training',
+    image_dir='E:/1807033/Dataset/TEMPTRAINIMG',
+    mask_dir='E:/1807033/Dataset/TEMPTRAINMASK',
+    # image_dir='E:/1807033/Dataset/sub_train_256',
+    # mask_dir='E:/1807033/Dataset/mask/mask/training',
     image_transform=image_transform,
     mask_transform=mask_transform
 )
 
 val_dataset = InpaintingDataset(
-    image_dir='E:/1807033/Dataset/val_256/val_256',
-    mask_dir='E:/1807033/Dataset/mask/mask/validation',
-    # image_dir='E:/1807033/Dataset/TEMPVALIMG',
-    # mask_dir='E:/1807033/Dataset/TEMPVALMASK',
+    # image_dir='E:/1807033/Dataset/val_256/val_256',
+    # mask_dir='E:/1807033/Dataset/mask/mask/validation',
+    image_dir='E:/1807033/Dataset/TEMPVALIMG',
+    mask_dir='E:/1807033/Dataset/TEMPVALMASK',
     image_transform=image_transform,
     mask_transform=mask_transform
 )
@@ -159,15 +152,12 @@ class UNetDown(nn.Module):
 
 
 class UNetUp(nn.Module):
-    def __init__(self, in_size, out_size, skip_channels, dilation, dropout=0.0):
+    def __init__(self, in_size, out_size, skip_channels, dropout=0.0):
         super(UNetUp, self).__init__()
-        # Adjust the input channels for the transposed convolution
         self.up = nn.ConvTranspose2d(in_size, out_size, kernel_size=4, stride=2, padding=1)
+
         self.conv = nn.Sequential(
-            nn.BatchNorm2d(out_size + skip_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_size + skip_channels, out_size, kernel_size=3, stride=1, padding=dilation, dilation=dilation),
-            nn.BatchNorm2d(out_size),
+            nn.BatchNorm2d(out_size + skip_channels),  
             nn.ReLU(inplace=True)
         )
         if dropout:
@@ -175,7 +165,7 @@ class UNetUp(nn.Module):
 
     def forward(self, x, skip_input):
         x = self.up(x)
-        x = torch.cat((x, skip_input), 1)
+        x = torch.cat((x, skip_input), 1)  
         x = self.conv(x)
         return x
 
@@ -188,46 +178,54 @@ class UNetGenerator(nn.Module):
         self.down3 = UNetDown(128, 256)
         self.down4 = UNetDown(256, 512)
         self.down5 = UNetDown(512, 1024)
-        self.up1 = UNetUp(in_size=1024, out_size=512, skip_channels=512, dilation=2, dropout=0.5)
-        self.up2 = UNetUp(in_size=512, out_size=256, skip_channels=256, dilation=2, dropout=0.5)
-        self.up3 = UNetUp(in_size=256, out_size=128, skip_channels=128, dilation=2, dropout=0.0)
-        self.up4 = UNetUp(in_size=128, out_size=64, skip_channels=64, dilation=2, dropout=0.0)
-        # Adjust the number of output channels in the final layer to match your input image
+
+
+        self.up1 = UNetUp(in_size=1024, out_size=512, skip_channels=512, dropout=0.5)
+        self.up2 = UNetUp(in_size=1024, out_size=256, skip_channels=256, dropout=0.5)  
+        self.up3 = UNetUp(in_size=512, out_size=128, skip_channels=128, dropout=0.0)   
+        self.up4 = UNetUp(in_size=256, out_size=64, skip_channels=64, dropout=0.0)     
         self.final = nn.Sequential(
-            nn.ConvTranspose2d(64, 3, 4, 2, 1),
+            nn.ConvTranspose2d(128, 3, 4, 2, 1),  
             nn.Tanh()
         )
 
     def forward(self, x, mask):
+        # Downsampling
+        
+        
         d1 = self.down1(x)
         d2 = self.down2(d1)
         d3 = self.down3(d2)
         d4 = self.down4(d3)
         d5 = self.down5(d4)
+
+        
         u1 = self.up1(d5, d4)
-        u2 = self.up2(u1, d3)
-        u3 = self.up3(u2, d2)
+        #print(u1.size(), d3.size())  
+        u2 = self.up2(u1, d3)  
+        u3 = self.up3(u2, d2)  
         u4 = self.up4(u3, d1)
-        u4 = self.final(u4)
+
+        u4 = self.final(u4)  # Generated part
         return u4 * mask + x * (1 - mask)
 
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
+        def discriminator_block(in_filters, out_filters, normalization=True):
+            layers = [nn.Conv2d(in_filters, out_filters, 4, stride=2, padding=1)]
+            if normalization:
+                layers.append(nn.BatchNorm2d(out_filters))
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
+            return layers
+
         self.model = nn.Sequential(
-            *self.discriminator_block(3, 64, normalization=False),
-            *self.discriminator_block(64, 128),
-            *self.discriminator_block(128, 256),
-            *self.discriminator_block(256, 512),
+            *discriminator_block(3, 64, normalization=False),
+            *discriminator_block(64, 128),
+            *discriminator_block(128, 256),
+            *discriminator_block(256, 512),
             nn.Conv2d(512, 1, 4, padding=1)
         )
-
-    def discriminator_block(self, in_filters, out_filters, normalization=True):
-        layers = [nn.Conv2d(in_filters, out_filters, 4, stride=2, padding=1)]
-        if normalization:
-            layers.append(nn.BatchNorm2d(out_filters))
-        layers.append(nn.LeakyReLU(0.2, inplace=True))
-        return layers
 
     def forward(self, img):
         return self.model(img)
@@ -241,11 +239,11 @@ else:
 generator = UNetGenerator().to(device)
 discriminator = Discriminator().to(device)
 
-# generator_path = 'E:/1807033/Generator/generator_30_1700.pth'
-# discriminator_path = 'E:/1807033/Discriminator/discriminator_30_1700.pth'
+generator_path = 'E:/1807033/Generator/generator_43_300.pth'
+discriminator_path = 'E:/1807033/Discriminator/discriminator_43_300.pth'
 
-# generator.load_state_dict(torch.load(generator_path))
-# discriminator.load_state_dict(torch.load(discriminator_path))
+generator.load_state_dict(torch.load(generator_path))
+discriminator.load_state_dict(torch.load(discriminator_path))
 
 
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=3e-4, betas=(0.5, 0.999))
@@ -312,23 +310,20 @@ def validate_model(generator,val_dataloader, criterion_pixelwise, psnr, device, 
     print(f"[Validation] [Average L1 loss: {avg_l1_loss:.4f}%] "
           f"[Average L2 loss: {avg_l2_loss:.4f}%] [Average PSNR: {avg_psnr}]")
     
-    
-    # Write validation metrics to the file
-    metrics_file.write(f"[Validation] [Epoch {epoch}, Batch {batch}] [Average L1 loss: {avg_l1_loss:.4f}%] "
-                      f"[Average L2 loss: {avg_l2_loss:.4f}%] [Average PSNR: {avg_psnr}]\n")
+    metrics_file.write(f"[Validation] [Average L1 loss: {avg_l1_loss:.4f}%] "
+                           f"[Average L2 loss: {avg_l2_loss:.4f}%] [Average PSNR: {avg_psnr}]\n")
 
-    
     generator.train()
     discriminator.train()
     
-start_epoch = 31  # Set the epoch where the pre-training left off
+start_epoch = 44  # Set the epoch where the pre-training left off
 total_epochs = 100
 accumulation_steps = 4
 from torch.cuda.amp import GradScaler, autocast
-validation_interval = 500
+validation_interval = 100
 scaler = GradScaler()
-with open('validation_metrics2.txt', 'w') as validation_metrics_file:
-    for epoch in range(num_epochs):
+with open('validation_metrics.txt', 'w') as validation_metrics_file:
+    for epoch in range(start_epoch, total_epochs):
         for i, batch in enumerate(train_dataloader):
             if batch is None:
                 continue
@@ -348,49 +343,38 @@ with open('validation_metrics2.txt', 'w') as validation_metrics_file:
     
                 # Compute loss for the generator
                 pred_fake = discriminator(fake_images)
-                gan_loss_fake_global = criterion_GAN(pred_fake.view(-1), valid.view(-1))
-    
-                # For local loss, you can select a local patch from the real and fake images
-                patch_size = 64
-                top_left_x = torch.randint(0, real_images.shape[2] - patch_size, size=(1,))
-                top_left_y = torch.randint(0, real_images.shape[3] - patch_size, size=(1,))
-                real_images_patch = real_images[:, :, top_left_x:top_left_x+patch_size, top_left_y:top_left_y+patch_size]
-                fake_images_patch = fake_images[:, :, top_left_x:top_left_x+patch_size, top_left_y:top_left_y+patch_size]
-                
-                pred_fake_patch = discriminator(fake_images_patch)
-                valid_patch_shape = pred_fake_patch.shape
-                valid_patch = torch.ones(valid_patch_shape, dtype=torch.float, device=device)
-                gan_loss_fake_local = criterion_GAN(pred_fake_patch.view(-1), valid_patch.view(-1))
-                    
+                gan_loss_fake = criterion_GAN(pred_fake, valid)
                 pixel_loss = criterion_pixelwise(fake_images, real_images) * lambda_pixel
-                g_loss = gan_loss_fake_global + gan_loss_fake_local + pixel_loss
+                g_loss = gan_loss_fake + pixel_loss
     
                 # Compute loss for the discriminator
                 pred_real = discriminator(real_images)
                 pred_fake_detached = discriminator(fake_images.detach())
-                real_loss = criterion_GAN(pred_real.view(-1), valid.view(-1))
-                fake_loss = criterion_GAN(pred_fake_detached.view(-1), fake.view(-1))
+                real_loss = criterion_GAN(pred_real, valid)
+                fake_loss = criterion_GAN(pred_fake_detached, fake)
                 d_loss = (real_loss + fake_loss) / 2
+                
+                
     
             # Backpropagation
             scaler.scale(g_loss).backward()
-            scaler.step(optimizer_G)
-            scaler.update()
-            optimizer_G.zero_grad()
-    
             scaler.scale(d_loss).backward()
-            scaler.step(optimizer_D)
-            scaler.update()
-            optimizer_D.zero_grad()
     
+            # Only step and update if it's time, according to the gradient accumulation steps
+            if i % accumulation_steps == 0:
+                scaler.step(optimizer_G)
+                scaler.step(optimizer_D)
+                scaler.update()
+                optimizer_G.zero_grad()
+                optimizer_D.zero_grad()
             if i % save_interval == 0:
-                generator_path = f'E:/1807033/Generator2/generator_{epoch}_{i}.pth'
-                discriminator_path = f'E:/1807033/Discriminator2/discriminator_{epoch}_{i}.pth'
+                generator_path = f'E:/1807033/Generator/generator_{epoch}_{i}.pth'
+                discriminator_path = f'E:/1807033/Discriminator/discriminator_{epoch}_{i}.pth'
                 torch.save(generator.state_dict(), generator_path)
                 torch.save(discriminator.state_dict(), discriminator_path)
             if i % print_interval == 0:            
                 print(f"[Epoch {epoch}/{num_epochs}] [Batch {i}/{len(train_dataloader)}] "
-                      f"[D loss: {d_loss.item()}] [G loss: {gan_loss_fake_global.item()}, local: {gan_loss_fake_local.item()}, pixel: {pixel_loss.item()}]")
-    
+                      f"[D loss: {d_loss.item()}] [G loss: {gan_loss_fake.item()}, pixel: {pixel_loss.item()}]")
+            
             if i % validation_interval == 0 and i>0:
                 validate_model(generator, val_dataloader, criterion_pixelwise, psnr, device,validation_metrics_file)
